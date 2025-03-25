@@ -988,7 +988,7 @@ contract Ownable is IOwnable {
 }
 
 
-contract sLGNS is ERC20Permit, Ownable {
+contract sCSM is ERC20Permit, Ownable {
 
     using SafeMath for uint256;
 
@@ -1033,7 +1033,7 @@ contract sLGNS is ERC20Permit, Ownable {
 
     mapping ( address => mapping ( address => uint256 ) ) private _allowedValue;
 
-    constructor() ERC20("Staked Longinus", "sLGNS", 9) ERC20Permit() {
+    constructor() ERC20("Staked CSM", "sCSM", 9) ERC20Permit() {
         initializer = msg.sender;
         _totalSupply = INITIAL_FRAGMENTS_SUPPLY;
         _gonsPerFragment = TOTAL_GONS.div(_totalSupply);
