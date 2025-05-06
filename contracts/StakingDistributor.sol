@@ -382,13 +382,14 @@ contract Distributor is Policy {
     function distribute() external returns ( bool ) {
         if ( nextEpochBlock <= block.number ) {
             nextEpochBlock = nextEpochBlock.add( epochLength ); // set next epoch block
-            
+
+            uint rewardBase = IERC20( CSM ).totalSupply();
             // distribute rewards to each recipient
             for ( uint i = 0; i < info.length; i++ ) {
                 if ( info[ i ].rate > 0 ) {
                     ITreasury( treasury ).mintRewards( // mint and send from treasury
                         info[ i ].recipient, 
-                        nextRewardAt( info[ i ].rate ) 
+                        _nextRewardAt( rewardBase, info[ i ].rate )
                     );
                     adjust( i ); // check for adjustment
                 }
@@ -423,7 +424,9 @@ contract Distributor is Policy {
         }
     }
     
-    
+    function _nextRewardAt( uint rewardBase, uint _rate ) internal pure returns ( uint ) {
+        return rewardBase.mul( _rate ).div( 1000000 );
+    }
     
     /* ====== VIEW FUNCTIONS ====== */
 
@@ -433,7 +436,7 @@ contract Distributor is Policy {
         @return uint
      */
     function nextRewardAt( uint _rate ) public view returns ( uint ) {
-        return IERC20( CSM ).totalSupply().mul( _rate ).div( 1000000 );
+        return _nextRewardAt(IERC20( CSM ).totalSupply(), _rate);
     }
 
     /**

@@ -512,6 +512,7 @@ contract Ownable is IOwnable {
         require( msg.sender == _newOwner, "Ownable: must be new owner to pull");
         emit OwnershipPulled( _owner, _newOwner );
         _owner = _newOwner;
+        _newOwner = address(0);
     }
 }
 
@@ -727,6 +728,7 @@ contract Staking is Ownable {
         @param _contract address
      */
     function setContract( CONTRACTS _contract, address _address ) external onlyManager() {
+        require( _address != address(0), "Invalid zero address" );
         if( _contract == CONTRACTS.DISTRIBUTOR ) { // 0
             distributor = _address;
         } else if ( _contract == CONTRACTS.WARMUP ) { // 1

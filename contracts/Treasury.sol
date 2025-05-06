@@ -120,19 +120,6 @@ library Address {
     }
 }
 
-interface ICurve {
-    function exchange_underlying(
-        uint256 i,
-        uint256 j,
-        uint256 dx,
-        uint256 min_dy
-    ) external;
-
-    function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy) external;
-
-    function underlying_coins(uint256 arg0) external view returns (address);
-}
-
 interface IOwnable {
     function manager() external view returns (address);
 
@@ -187,6 +174,7 @@ contract Ownable is IOwnable {
         require(msg.sender == _newOwner, "Ownable: must be new owner to pull");
         emit OwnershipPulled(_owner, _newOwner);
         _owner = _newOwner;
+        _newOwner = address(0);
     }
 }
 
@@ -319,7 +307,7 @@ contract Treasury is Ownable {
         LIQUIDITYDEPOSITOR,
         LIQUIDITYTOKEN,
         LIQUIDITYMANAGER,
-        DEBTOR,
+        DISTRIBUTOR,
         REWARDMANAGER,
         SCSM
     }
@@ -357,29 +345,29 @@ contract Treasury is Ownable {
     mapping(address => bool) public isLiquidityManager;
     mapping(address => uint) public LiquidityManagerQueue; // Delays changes to mapping.
 
-    address[] public debtors; // Push only, beware false-positives. Only for viewing.
-    mapping(address => bool) public isDebtor;
-    mapping(address => uint) public debtorQueue; // Delays changes to mapping.
-    mapping(address => uint) public debtorBalance;
-
     address[] public rewardManagers; // Push only, beware false-positives. Only for viewing.
     mapping(address => bool) public isRewardManager;
     mapping(address => uint) public rewardManagerQueue; // Delays changes to mapping.
 
     address public sCSM;
-    address public curve;
     uint public sCSMQueue; // Delays change to sCSM address
 
     uint public totalReserves; // Risk-free value of all assets
-    uint public totalDebt;
+
+    address public distributor;
+    mapping(address => uint) public distributorQueue; // Delays changes to mapping.
+
+    modifier onlyDistributor() {
+        require(distributor == msg.sender, "Distributor only");
+        _;
+    }
 
     constructor(
         address _CSM,
         address _USDT,
         address _USDTCSM,
         address _calu,
-        uint _blocksNeededForQueue,
-        address _curve
+        uint _blocksNeededForQueue
     ) {
         require(_CSM != address(0));
         CSM = _CSM;
@@ -391,7 +379,6 @@ contract Treasury is Ownable {
         liquidityTokens.push(_USDTCSM);
         bondCalculator[_USDTCSM] = _calu;
         blocksNeededForQueue = _blocksNeededForQueue;
-        curve = _curve;
     }
 
     /**
@@ -407,7 +394,9 @@ contract Treasury is Ownable {
         uint _profit
     ) external returns (uint send_) {
         require(isReserveToken[_token] || isLiquidityToken[_token], "Not accepted");
+        uint beforeBal = IERC20(_token).balanceOf(address(this));
         IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
+        require(IERC20(_token).balanceOf(address(this)) - beforeBal == _amount, "Not support deflationary token");
 
         if (isReserveToken[_token]) {
             require(isReserveDepositor[msg.sender], "Not approved");
@@ -447,68 +436,6 @@ contract Treasury is Ownable {
     }
 
     /**
-        @notice allow approved address to borrow reserves
-        @param _amount uint
-        @param _token address
-     */
-    function incurDebt(uint _amount, address _token) external {
-        require(isDebtor[msg.sender], "Not approved");
-        require(isReserveToken[_token], "Not accepted");
-
-        uint value = valueOf(_token, _amount);
-
-        uint maximumDebt = IERC20(sCSM).balanceOf(msg.sender); // Can only borrow against sCSM held
-        uint availableDebt = maximumDebt.sub(debtorBalance[msg.sender]);
-        require(value <= availableDebt, "Exceeds debt limit");
-
-        debtorBalance[msg.sender] = debtorBalance[msg.sender].add(value);
-        totalDebt = totalDebt.add(value);
-
-        totalReserves = totalReserves.sub(value);
-        emit ReservesUpdated(totalReserves);
-
-        IERC20(_token).transfer(msg.sender, _amount);
-
-        emit CreateDebt(msg.sender, _token, _amount, value);
-    }
-
-    /**
-        @notice allow approved address to repay borrowed reserves with reserves
-        @param _amount uint
-        @param _token address
-     */
-    function repayDebtWithReserve(uint _amount, address _token) external {
-        require(isDebtor[msg.sender], "Not approved");
-        require(isReserveToken[_token], "Not accepted");
-
-        IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
-
-        uint value = valueOf(_token, _amount);
-        debtorBalance[msg.sender] = debtorBalance[msg.sender].sub(value);
-        totalDebt = totalDebt.sub(value);
-
-        totalReserves = totalReserves.add(value);
-        emit ReservesUpdated(totalReserves);
-
-        emit RepayDebt(msg.sender, _token, _amount, value);
-    }
-
-    /**
-        @notice allow approved address to repay borrowed reserves with CSM
-        @param _amount uint
-     */
-    function repayDebtWithCSM(uint _amount) external {
-        require(isDebtor[msg.sender], "Not approved");
-
-        ICSMERC20(CSM).burnFrom(msg.sender, _amount);
-
-        debtorBalance[msg.sender] = debtorBalance[msg.sender].sub(_amount);
-        totalDebt = totalDebt.sub(_amount);
-
-        emit RepayDebt(msg.sender, CSM, _amount, _amount);
-    }
-
-    /**
         @notice allow approved address to withdraw assets
         @param _token address
         @param _amount uint
@@ -534,7 +461,7 @@ contract Treasury is Ownable {
     /**
         @notice send epoch reward to staking contract
      */
-    function mintRewards(address _recipient, uint _amount) external {
+    function mintRewards(address _recipient, uint _amount) external onlyDistributor {
         require(isRewardManager[msg.sender], "Not approved");
         require(_amount <= excessReserves(), "Insufficient reserves");
 
@@ -548,7 +475,7 @@ contract Treasury is Ownable {
         @return uint
      */
     function excessReserves() public view returns (uint) {
-        return totalReserves.sub(IERC20(CSM).totalSupply().sub(totalDebt));
+        return totalReserves.sub(IERC20(CSM).totalSupply());
     }
 
     /**
@@ -639,9 +566,9 @@ contract Treasury is Ownable {
             LiquidityManagerQueue[_address] = block.number.add(
                 blocksNeededForQueue.mul(2)
             );
-        } else if (_managing == MANAGING.DEBTOR) {
+        } else if (_managing == MANAGING.DISTRIBUTOR) {
             // 7
-            debtorQueue[_address] = block.number.add(blocksNeededForQueue);
+            distributorQueue[_address] = block.number.add(blocksNeededForQueue);
         } else if (_managing == MANAGING.REWARDMANAGER) {
             // 8
             rewardManagerQueue[_address] = block.number.add(blocksNeededForQueue);
@@ -743,16 +670,11 @@ contract Treasury is Ownable {
             }
             result = !isLiquidityManager[_address];
             isLiquidityManager[_address] = result;
-        } else if (_managing == MANAGING.DEBTOR) {
+        } else if (_managing == MANAGING.DISTRIBUTOR) {
             // 7
-            if (requirements(debtorQueue, isDebtor, _address)) {
-                debtorQueue[_address] = 0;
-                if (!listContains(debtors, _address)) {
-                    debtors.push(_address);
-                }
-            }
-            result = !isDebtor[_address];
-            isDebtor[_address] = result;
+            require(distributorQueue[_address] != 0, "Must queue");
+            require(distributorQueue[_address] <= block.number, "Queue not expired");
+            distributor = _address;
         } else if (_managing == MANAGING.REWARDMANAGER) {
             // 8
             if (requirements(rewardManagerQueue, isRewardManager, _address)) {
@@ -812,32 +734,4 @@ contract Treasury is Ownable {
         return false;
     }
 
-    /**
-     * @notice allow manager to swap reserve tokens to main coins
-     * @param i uint256 // sell token
-     * @param j uint256 // buy token
-     */
-    function swapReserve(
-        uint256 i,
-        uint256 j,
-        uint _amount
-    ) external onlyManager {
-        address fromToken = ICurve(curve).underlying_coins(i);
-        address toToken = ICurve(curve).underlying_coins(j);
-        require(isReserveToken[fromToken], "Not accepted");
-        require(isReserveToken[toToken], "Not accepted");
-        require(
-            IERC20(fromToken).balanceOf(address(this)) >= _amount,
-            "Insufficient reserves"
-        );
-
-        IERC20(fromToken).approve(curve, _amount);
-        ICurve(curve).exchange_underlying(i, j, _amount, 1);
-
-        emit ReservesManaged(fromToken, _amount);
-    }
-
-    function setCurve(address _curve) external onlyManager {
-        curve = _curve;
-    }
 }

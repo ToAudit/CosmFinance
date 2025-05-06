@@ -436,6 +436,8 @@ library Address {
 }
 
 interface IERC20 {
+    function decimals() external view returns (uint8);
+
     /**
      * @dev Returns the amount of tokens in existence.
      */
@@ -506,10 +508,7 @@ interface IERC20 {
     event Approval(address indexed owner, address indexed spender, uint256 value);
 }
 
-abstract contract ERC20
-is
-IERC20
-{
+abstract contract ERC20 is IERC20 {
 
     using SafeMath for uint256;
 
@@ -531,9 +530,6 @@ IERC20
     // Present in ERC777
     string internal _symbol;
 
-    // Present in ERC777
-    uint8 internal _decimals;
-
     /**
      * @dev Sets the values for {name} and {symbol}, initializes {decimals} with
      * a default value of 18.
@@ -543,10 +539,9 @@ IERC20
      * All three of these values are immutable: they can only be set once during
      * construction.
      */
-    constructor (string memory name_, string memory symbol_, uint8 decimals_) {
+    constructor (string memory name_, string memory symbol_) {
         _name = name_;
         _symbol = symbol_;
-        _decimals = decimals_;
     }
 
     /**
@@ -580,8 +575,8 @@ IERC20
      * {IERC20-balanceOf} and {IERC20-transfer}.
      */
     // Present in ERC777
-    function decimals() public view returns (uint8) {
-        return _decimals;
+    function decimals() public pure virtual override returns (uint8) {
+        return 18;
     }
 
     /**
@@ -984,6 +979,7 @@ contract Ownable is IOwnable {
         require( msg.sender == _newOwner, "Ownable: must be new owner to pull");
         emit OwnershipPulled( _owner, _newOwner );
         _owner = _newOwner;
+        _newOwner = address(0);
     }
 }
 
@@ -1033,10 +1029,14 @@ contract sCSM is ERC20Permit, Ownable {
 
     mapping ( address => mapping ( address => uint256 ) ) private _allowedValue;
 
-    constructor() ERC20("Staked CSM", "sCSM", 9) ERC20Permit() {
+    constructor() ERC20("Staked CSM", "sCSM") ERC20Permit() {
         initializer = msg.sender;
         _totalSupply = INITIAL_FRAGMENTS_SUPPLY;
         _gonsPerFragment = TOTAL_GONS.div(_totalSupply);
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 9;
     }
 
     function initialize( address stakingContract_) external returns ( bool ) {
@@ -1140,6 +1140,7 @@ contract sCSM is ERC20Permit, Ownable {
     }
 
     function transfer( address to, uint256 value ) public override returns (bool) {
+        require(to != address(0), "Invalid zero address");
         uint256 gonValue = gonsForBalance(value);
         _gonBalances[ msg.sender ] = _gonBalances[ msg.sender ].sub( gonValue );
         _gonBalances[ to ] = _gonBalances[ to ].add( gonValue );
@@ -1153,7 +1154,8 @@ contract sCSM is ERC20Permit, Ownable {
     }
 
     function transferFrom( address from, address to, uint256 value ) public override returns ( bool ) {
-       _allowedValue[ from ][ msg.sender ] = _allowedValue[ from ][ msg.sender ].sub( value );
+        require(from != address(0) && to != address(0), "Invalid zero address");
+        _allowedValue[ from ][ msg.sender ] = _allowedValue[ from ][ msg.sender ].sub( value );
        emit Approval( from, msg.sender,  _allowedValue[ from ][ msg.sender ] );
 
         uint256 gonValue = gonsForBalance( value );
@@ -1166,7 +1168,8 @@ contract sCSM is ERC20Permit, Ownable {
     }
 
     function approve( address spender, uint256 value ) public override returns (bool) {
-         _allowedValue[ msg.sender ][ spender ] = value;
+        require(spender != address(0), "Invalid zero address");
+        _allowedValue[ msg.sender ][ spender ] = value;
          emit Approval( msg.sender, spender, value );
          return true;
     }
