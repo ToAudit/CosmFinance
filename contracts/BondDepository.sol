@@ -45,6 +45,7 @@ contract Ownable is IOwnable {
     function renounceManagement() public virtual override onlyPolicy {
         emit OwnershipPushed(_owner, address(0));
         _owner = address(0);
+        _newOwner = address(0);
     }
 
     function pushManagement(

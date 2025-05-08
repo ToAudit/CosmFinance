@@ -160,6 +160,7 @@ contract Ownable is IOwnable {
     function renounceManagement() public virtual override onlyManager {
         emit OwnershipPushed(_owner, address(0));
         _owner = address(0);
+        _newOwner = address(0);
     }
 
     function pushManagement(
@@ -308,7 +309,6 @@ contract Treasury is Ownable {
         LIQUIDITYTOKEN,
         LIQUIDITYMANAGER,
         DISTRIBUTOR,
-        REWARDMANAGER,
         SCSM
     }
 
@@ -344,10 +344,6 @@ contract Treasury is Ownable {
     address[] public liquidityManagers; // Push only, beware false-positives. Only for viewing.
     mapping(address => bool) public isLiquidityManager;
     mapping(address => uint) public LiquidityManagerQueue; // Delays changes to mapping.
-
-    address[] public rewardManagers; // Push only, beware false-positives. Only for viewing.
-    mapping(address => bool) public isRewardManager;
-    mapping(address => uint) public rewardManagerQueue; // Delays changes to mapping.
 
     address public sCSM;
     uint public sCSMQueue; // Delays change to sCSM address
@@ -462,7 +458,6 @@ contract Treasury is Ownable {
         @notice send epoch reward to staking contract
      */
     function mintRewards(address _recipient, uint _amount) external onlyDistributor {
-        require(isRewardManager[msg.sender], "Not approved");
         require(_amount <= excessReserves(), "Insufficient reserves");
 
         IERC20Mintable(CSM).mint(_recipient, _amount);
@@ -569,11 +564,8 @@ contract Treasury is Ownable {
         } else if (_managing == MANAGING.DISTRIBUTOR) {
             // 7
             distributorQueue[_address] = block.number.add(blocksNeededForQueue);
-        } else if (_managing == MANAGING.REWARDMANAGER) {
-            // 8
-            rewardManagerQueue[_address] = block.number.add(blocksNeededForQueue);
         } else if (_managing == MANAGING.SCSM) {
-            // 9
+            // 8
             sCSMQueue = block.number.add(blocksNeededForQueue);
         } else return false;
 
@@ -675,18 +667,8 @@ contract Treasury is Ownable {
             require(distributorQueue[_address] != 0, "Must queue");
             require(distributorQueue[_address] <= block.number, "Queue not expired");
             distributor = _address;
-        } else if (_managing == MANAGING.REWARDMANAGER) {
-            // 8
-            if (requirements(rewardManagerQueue, isRewardManager, _address)) {
-                rewardManagerQueue[_address] = 0;
-                if (!listContains(rewardManagers, _address)) {
-                    rewardManagers.push(_address);
-                }
-            }
-            result = !isRewardManager[_address];
-            isRewardManager[_address] = result;
         } else if (_managing == MANAGING.SCSM) {
-            // 9
+            // 8
             sCSMQueue = 0;
             sCSM = _address;
             result = true;
