@@ -310,6 +310,7 @@ contract Policy is IPolicy {
     function renouncePolicy() public virtual override onlyPolicy() {
         emit OwnershipTransferred( _policy, address(0) );
         _policy = address(0);
+        _newPolicy = address(0);
     }
 
     function pushPolicy( address newPolicy_ ) public virtual override onlyPolicy() {
@@ -321,6 +322,7 @@ contract Policy is IPolicy {
         require( msg.sender == _newPolicy );
         emit OwnershipTransferred( _policy, _newPolicy );
         _policy = _newPolicy;
+        _newPolicy = address(0);
     }
 }
 
